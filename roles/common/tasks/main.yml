@@ -1,0 +1,50 @@
+- name: Configure hostname
+  shell: '/bin/hostnamectl set-hostname openshift-master.campbigfalcon.io'
+
+- name: Fix hosts file 
+  lineinfile:
+    path: /etc/hosts
+    line: '{{ ansible_default_ipv4.address }}  {{ ansible_hostname }}.{{ ansible_domain }}'  
+
+- name: Install repo
+  yum: pkg=epel-release state=present
+
+- name: Install docker
+  yum: pkg=docker state=present update_cache=yes
+
+- name: edit docker sysconfig file
+  lineinfile:
+    path: /etc/sysconfig/docker
+    regexp: '^OPTIONS='
+    line: 'OPTIONS="--selinux-enabled --insecure-registry 172.30.0.0/16 --log-driver=journald --signature-verification=false"'
+
+- name: start-restart docker
+  service: name=docker enabled=yes state=started 
+
+- name: Install pacakges needed for OCP
+  yum: pkg={{ item }} state=present update_cache=yes
+  with_items:
+    - ansible
+    - bind-utils
+    - bridge-utils
+    - git
+    - iptables-services
+    - net-tools
+    - python-cryptography
+    - pyOpenSSL.x86_64
+    - wget
+
+- name: Get git installers
+  git: 
+    repo: 'https://github.com/openshift/openshift-ansible.git'
+    dest: openshift/
+    clone: yes
+
+- name: Send inventory file
+  template:
+    src: templates/inventory.erb.j2
+    dest: openshift/inventory.erb
+    owner: tix_salvador
+    mode: 0644
+
+

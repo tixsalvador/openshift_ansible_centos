@@ -1,0 +1,7 @@
+---  # Openshift install on AWS
+- hosts: aws
+  remote_user: tix_salvador
+  become: yes
+  become_method: sudo
+  roles:
+  - common
