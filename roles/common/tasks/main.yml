@@ -1,15 +1,18 @@
-- name: Configure hostname
+- name: configure hostname
   shell: '/bin/hostnamectl set-hostname openshift-master.campbigfalcon.io'
 
-- name: Fix hosts file 
+- name: fix hosts file 
   lineinfile:
     path: /etc/hosts
     line: '{{ ansible_default_ipv4.address }}  {{ ansible_hostname }}.{{ ansible_domain }}'  
 
-- name: Install repo
-  yum: pkg=epel-release state=present
+- name: install additional repos
+  yum: pkg={{ item }} state=present
+  with_items:
+    - epel-release
+    - centos-release-openshift-origin
 
-- name: Install docker
+- name: install docker
   yum: pkg=docker state=present update_cache=yes
 
 - name: edit docker sysconfig file
@@ -21,30 +24,18 @@
 - name: start-restart docker
   service: name=docker enabled=yes state=started 
 
-- name: Install pacakges needed for OCP
+- name: install pacakges and origin-client
   yum: pkg={{ item }} state=present update_cache=yes
   with_items:
-    - ansible
-    - bind-utils
-    - bridge-utils
+    - curl
     - git
-    - iptables-services
     - net-tools
-    - python-cryptography
-    - pyOpenSSL.x86_64
     - wget
+    - origin-clients
 
-- name: Get git installers
-  git: 
-    repo: 'https://github.com/openshift/openshift-ansible.git'
-    dest: openshift/
-    clone: yes
+- name: get public ip address and write to var
+  command: 'curl -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip'
+  register: public_ip
 
-- name: Send inventory file
-  template:
-    src: templates/inventory.erb.j2
-    dest: openshift/inventory.erb
-    owner: tix_salvador
-    mode: 0644
-
-
+- name: start openshift cluster
+  shell: "/usr/bin/oc cluster up --public-hostname={{ public_ip.stdout }} --routing-suffix={{ public_ip.stdout }}.nip.io"
