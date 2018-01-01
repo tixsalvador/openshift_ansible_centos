@@ -1,5 +1,13 @@
 - name: configure hostname
-  shell: '/bin/hostnamectl set-hostname openshift-master.campbigfalcon.io'
+  shell: '/usr/bin/hostnamectl set-hostname {{ public_hostname }}'
+
+- name: add hostnamectl to startup
+  lineinfile:
+    path: /etc/rc.d/rc.local
+    line: '/usr/bin/hostnamectl set-hostname {{ public_hostname }}'
+    mode: 0655
+    owner: root
+    group: root
 
 - name: fix hosts file 
   lineinfile:
@@ -20,11 +28,56 @@
     path: /etc/sysconfig/docker
     regexp: '^OPTIONS='
     line: 'OPTIONS="--selinux-enabled --insecure-registry 172.30.0.0/16 --log-driver=journald --signature-verification=false"'
+  notify:
+  - start-restart docker 
 
-- name: start-restart docker
-  service: name=docker enabled=yes state=started 
+- meta: flush_handlers
 
-- name: install pacakges and origin-client
+- name: determine docker bridge network
+  command: /bin/docker network inspect -f "{%raw%}{{range .IPAM.Config }}{{ .Subnet }}{{end}}{%endraw%}" bridge
+  register: docker_bridge_network
+
+- name: create dockerc firewall zone
+  command: '/usr/bin/firewall-cmd --permanent --new-zone dockerc'
+  ignore_errors: true
+  notify: 
+  - reload firewall
+
+- meta: flush_handlers
+
+- name: grant firewall access to docker_bridge_network
+  firewalld:
+    zone: dockerc
+    permanent: true
+    source: "{{ docker_bridge_network.stdout }}"
+    state: enabled
+    immediate: true
+
+- name: grant firewall access to api port 8443
+  firewalld:
+    zone: dockerc
+    permanent: true
+    port: 8443/tcp
+    state: enabled
+    immediate: true
+
+- name: grant firewall access to dns port 53
+  firewalld:
+    zone: dockerc
+    permanent: true
+    port: 53/udp
+    state: enabled
+    immediate: true
+
+- name: grant firewall access to dns port 8053
+  firewalld:
+    zone: dockerc
+    permanent: true
+    port: 8053/udp
+    state: enabled
+    immediate: true
+
+- name: install packages and origin-client
   yum: pkg={{ item }} state=present update_cache=yes
   with_items:
     - curl
@@ -39,3 +92,4 @@
 
 - name: start openshift cluster
   shell: "/usr/bin/oc cluster up --public-hostname={{ public_ip.stdout }} --routing-suffix={{ public_ip.stdout }}.nip.io"
+  ignore_errors: true
