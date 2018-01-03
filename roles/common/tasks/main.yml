@@ -1,5 +1,6 @@
 - name: configure hostname
   shell: '/usr/bin/hostnamectl set-hostname {{ public_hostname }}'
+  change_when: False
 
 - name: add hostnamectl to startup
   lineinfile:
@@ -36,12 +37,13 @@
 - name: determine docker bridge network
   command: /bin/docker network inspect -f "{%raw%}{{range .IPAM.Config }}{{ .Subnet }}{{end}}{%endraw%}" bridge
   register: docker_bridge_network
+  change_when: False
 
 - name: create dockerc firewall zone
   command: '/usr/bin/firewall-cmd --permanent --new-zone dockerc'
   ignore_errors: true
   notify: 
-  - reload firewall
+  - restart firewall
 
 - meta: flush_handlers
 
