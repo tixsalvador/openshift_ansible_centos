@@ -2,4 +2,4 @@
   service: name=docker enabled=yes state=started
 
 - name: restart firewall
-  service: name=firewalld state=restarted 
+  service: name=firewalld state=restarted enabled=yes 
