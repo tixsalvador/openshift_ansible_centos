@@ -1,108 +1,39 @@
-- name: configure hostname
-  shell: '/usr/bin/hostnamectl set-hostname {{ public_hostname }}'
-  change_when: False
+- name: set ip forward
+  command: 'sysctl net.ipv4.ip_forward=1'
 
-- name: add hostnamectl to startup
-  lineinfile:
-    path: /etc/rc.d/rc.local
-    line: '/usr/bin/hostnamectl set-hostname {{ public_hostname }}'
-    mode: 0655
-    owner: root
-    group: root
-
-- name: fix hosts file 
-  lineinfile:
-    path: /etc/hosts
-    line: '{{ ansible_default_ipv4.address }}  {{ ansible_hostname }}.{{ ansible_domain }}'  
-
-- name: install additional repos
-  yum: pkg={{ item }} state=present
+- name: remove old version of docker
+  apt: name {{ item }} state=absent
   with_items:
-    - epel-release
-    - centos-release-openshift-origin
+    - docker
+    - docker-engine
+    - docker.io
 
-- name: install firewall
-  yum:
-   name: firewalld
-   state: latest
-  notify:
-  - restart firewall
+- name: install packages to allow apt to use repository over https
+  apt: name {{ item }} state=present 
+  with_items:
+    - apt-transport-https
+    - ca-certificates
+    - curl
+    - software-properties-common
+    - wget
+
+- name: add docker official gpg key
+  shell: 'curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -'
+
+- name: setup the stable docker repository
+  shell: 'add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"'
 
 - name: install docker
-  yum: pkg=docker state=present update_cache=yes
+  apt: 
+    name: docker-ce 
+    state: present
+    update_cache: yes
 
-- name: edit docker sysconfig file
-  lineinfile:
-    path: /etc/sysconfig/docker
-    regexp: '^OPTIONS='
-    line: 'OPTIONS="--selinux-enabled --insecure-registry 172.30.0.0/16 --log-driver=journald --signature-verification=false"'
-  notify:
-  - start-restart docker 
-
-- meta: flush_handlers
-
-- name: determine docker bridge network
-  command: /bin/docker network inspect -f "{%raw%}{{range .IPAM.Config }}{{ .Subnet }}{{end}}{%endraw%}" bridge
-  register: docker_bridge_network
-  change_when: False
-
-- name: create dockerc firewall zone
-  command: '/usr/bin/firewall-cmd --permanent --new-zone dockerc'
-  ignore_errors: true
-  notify: 
-  - restart firewall
-
-- meta: flush_handlers
-
-- name: grant firewall access to docker_bridge_network
-  firewalld:
-    zone: dockerc
-    permanent: true
-    source: "{{ docker_bridge_network.stdout }}"
-    state: enabled
-    immediate: true
-
-- name: grant firewall access to api port 8443
-  firewalld:
-    zone: dockerc
-    permanent: true
-    port: 8443/tcp
-    state: enabled
-    immediate: true
-
-- name: grant firewall access to dns port 53
-  firewalld:
-    zone: dockerc
-    permanent: true
-    port: 53/udp
-    state: enabled
-    immediate: true
-
-- name: grant firewall access to dns port 8053
-  firewalld:
-    zone: dockerc
-    permanent: true
-    port: 8053/udp
-    state: enabled
-    immediate: true
-
-- name: install packages and origin-client
-  yum: pkg={{ item }} state=present update_cache=yes
-  with_items:
-    - curl
-    - git
-    - net-tools
-    - wget
-    - origin-clients
-
-- name: get public ip address and write to var
-  command: 'curl http://169.254.169.254/latest/meta-data/public-ipv4'
-  register: public_ip
-
-- name: get public hostname and write to var
-  command: 'curl http://169.254.169.254/latest/meta-data/public-hostname'
-  register: public_hostname
-
-- name: start openshift cluster
-  shell: "/usr/bin/oc cluster up --public-hostname={{ public_hostname.stdout }} --routing-suffix={{ public_ip.stdout }}.nip.io"
-  ignore_errors: true
+- name: configure docker daemon with an insecurity registry parameter
+  template:
+    src: files/daemon.json.j2
+    dest: /etc/docker/daemon.json 
+    owner: root
+    group: root
+    mode: 0600
+  notify: restart docker 
